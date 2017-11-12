@@ -3,6 +3,13 @@
 #include <sys/stat.h>
 #include <cstring>
 
+//#define WINDOWS
+
+// windows compatibility
+#ifdef WINDOWS
+#define stat _stat
+#endif
+
 /*
 * Structure that defines the old tar header (Tar V7)
 */
