@@ -90,6 +90,7 @@ int main(int argc, char * argv[]) {
   // create/update the tar archive
   FILE * tar = fopen(argv[1], "rb+");
   if(tar == NULL) tar = fopen(argv[1], "wb"); // this means we have to create a new tar
+  if(tar == NULL) {printf("ERROR: Failed to create tarfile.\n"); return -2;} // this means we can't create a tar at all
   
   fseek(tar, -(HEADER_SIZE * 2), SEEK_END); // over-write the EOF indicator with each creation/update
   fwrite(&tarv7header, sizeof(tarv7header), 1, tar); // write ALL of the header
