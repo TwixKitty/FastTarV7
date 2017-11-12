@@ -1,8 +1,11 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <cmath>
+#include <cstdio>
+#include <sys/stat.h>
+#include <cstring>
 
+/*
+* Structure that defines the old tar header (Tar V7)
+*/
 typedef struct posix_header
 {                              /* byte offset */
   char name[100];               /*   0 */
@@ -22,18 +25,12 @@ typedef struct posix_header
 #define HEADER_SIZE 512
 // This means the data size is also 512 bytes to make the 1024 byte minimum
 #define DATA_SIZE 512
-// These are all defined to allow for a custom implementation if it's so desired to have big chunks
-
-// we define all of this stuff for compatiblity with Windows, but technically you could get the stats and figure all of this out on a unix/Posix system (TODO: ADD WIN VS NIX BUILD)
-#define FILE_MODE "0000664"
-#define FILE_UID "0001750"
-#define FILE_GID "0001750"
 
 /*
 * Convert a number to the octal number base
 */
-int toOctal(int n) {
-  int oct = 0, j = 0;
+long toOctal(long n) {
+  long oct = 0, j = 0;
   while(n > 0) {
     oct += (pow(10,j++) * (n % 8));
     n /= 8;
@@ -49,33 +46,27 @@ int main(int argc, char * argv[]) {
     return 0;
   }
   
-  size_t sz = 0;
-  int dp = 1; // data pointer
-  char * data = (char *)calloc(DATA_SIZE * dp, sizeof(char)); // allocate 512 bytes for data
+  size_t sz = 0; // holds the size
   
-  // let's get the input file's size + data
+  // get input file size
   FILE * in = fopen(argv[2], "rb");
-  fseek(in, 0L, SEEK_END);
-  sz = ftell(in); // don't need octal yet since we're still reading
-  rewind(in); // rewind the file
-  // let's get the data now
-  while(sz > (DATA_SIZE * dp)) { // this means we need more space
-    free(data); // free up the OLD memory pointer
-    data = (char *)calloc(DATA_SIZE * (++dp), sizeof(char)); // allocate MORE data!!
-  }
-  fread(data, sizeof(char), sz, in);
+  if(in == NULL) {printf("ERROR: Input file doesn't exist.\n"); return -1;} // check if file exists
+  fseek(in, 0L, SEEK_END); // seek to end
+  sz = toOctal(ftell(in)); // get the file size in octal
   fclose(in);
   
-  sz = toOctal(sz); // we need to turn it into octal before it ends up on the header
+  // get file stats
+  struct stat info;
+  stat(argv[2], &info);
   
-  // first thing's first, let's prepare the header
-  TARV7_HEADER tarv7header = {0}; // start everything NULLED out
-  strcpy(tarv7header.name, argv[2]); // copy the target file into the new header
-  strcpy(tarv7header.mode, FILE_MODE);
-  strcpy(tarv7header.uid, FILE_UID);
-  strcpy(tarv7header.gid, FILE_GID);
-  sprintf(tarv7header.size, "%011d", (int)sz);
-  strcpy(tarv7header.mtime, "13201450112");
+  // create the TarV7 header
+  TARV7_HEADER tarv7header = {0}; // initialize all values to null
+  strcpy(tarv7header.name, argv[2]); // copy target file name into header
+  sprintf(tarv7header.mode, "%07u", info.st_mode); // file mode
+  sprintf(tarv7header.uid, "%07u", info.st_uid); // file UID
+  sprintf(tarv7header.gid, "%07u", info.st_gid); // file GID
+  sprintf(tarv7header.size, "%011lu", sz); // file size
+  sprintf(tarv7header.mtime, "%011ld", toOctal(info.st_mtime)); // last modification time
   strcpy(tarv7header.chksum, "        "); // checksum is initialized to spaces by default!
   tarv7header.typeflag = '0';
   
@@ -91,11 +82,10 @@ int main(int argc, char * argv[]) {
   
   sprintf(tarv7header.chksum, "%07d", checksum); // copy the octal checksum into the checksum part of the header
   
-  
-  //strcpy(data, "This is a file that I want to tar up"); // get the data in there!
-  
   char footer[HEADER_SIZE * 2] = {0}; // we need this footer on the TAR file for it to be proper!
   // it's a full chunk
+  
+  char buf[DATA_SIZE]; // holds the data, we work in DATA_SIZE byte chunks since it's very convenient
   
   // create/update the tar archive
   FILE * tar = fopen(argv[1], "rb+");
@@ -103,11 +93,20 @@ int main(int argc, char * argv[]) {
   
   fseek(tar, -(HEADER_SIZE * 2), SEEK_END); // over-write the EOF indicator with each creation/update
   fwrite(&tarv7header, sizeof(tarv7header), 1, tar); // write ALL of the header
-  fwrite(data, sizeof(char), DATA_SIZE * dp, tar); // write ALL of the data!
-  fwrite(footer, sizeof(char), (HEADER_SIZE * 2), tar); //lastly, the EOF footer
-  fclose(tar);
   
-  // free resources
-  free(data);
+  // time to write the data in
+  in = fopen(argv[2], "rb"); // open the target file
+  for(;;) { // start reading
+    fread(buf, sizeof(char), DATA_SIZE, in);
+    fwrite(buf, sizeof(char), DATA_SIZE, tar);
+    if(feof(in)) {
+      break;
+    }
+  }
+  fclose(in); // close the file
+  
+  fwrite(footer, sizeof(char), (HEADER_SIZE * 2), tar); //lastly, the EOF footer
+  fclose(tar); // close the tar
+  
   return 0;
 }
